@@ -4,421 +4,605 @@
 
 | Dato | Valore |
 |---|---|
-| Progetto | aegis |
+| Progetto | Aegis |
 | Corso | Ingegneria del Software e Interazione Uomo-Macchina |
 | Docenti | Prof.ssa Mariacarla Staffa |
-| Candidati | [Inserisci Nome e Cognome] |
+| Candidati | Alessio Attilio, Michela Rita Brancaccio, Andrea Plini |
 | Anno accademico | 2025/2026 |
-
-Bozza aggiornata il 17 novembre 2026. L’architettura è iniziale e descrive il sistema proposto. Il prodotto non è ancora implementato. Le descrizioni dei componenti e dei flussi indicano comportamenti attesi e non attestano funzionalità realizzate o verificate. Runtime Jakarta EE, fonti dati, area pilota e servizi gestiti sono da convalidare secondo la [roadmap](MILESTONES.md).
 
 ## SOMMARIO
 
-| Sezione | Contenuto |
-|---|---|
-| [Introduzione](#introduzione) | Scopo, obiettivi, definizioni, riferimenti e panoramica |
-| [Sistema corrente](#sistema-corrente) | Stato attuale e contesto |
-| [Panoramica](#31-panoramica) | Architettura generale |
-| [Decomposizione del sistema](#32-decomposizione-del-sistema) | Moduli e responsabilità |
-| [Diagramma dei moduli](#321-diagramma-dei-moduli) | Relazioni tra componenti e dipendenze |
-| [Hardware/software mapping](#33-hardwaresoftware-mapping) | Nodi e responsabilità |
-| [Gestione dei dati persistenti](#34-gestione-dei-dati-persistenti) | [Struttura relazionale](#341-postgresql-e-struttura-relazionale), [object storage](#342-object-storage), [sincronizzazione](#343-meccanismi-di-sincronizzazione) |
-| [Controllo accessi e sicurezza](#35-controllo-accessi-e-sicurezza) | [Identità](#351-autenticazione-e-identità), [accesso ai dati](#352-controllo-degli-accessi-ai-dati), [immagini](#353-gestione-delle-immagini), [abusi](#354-protezione-da-abusi) |
-| [Flusso di controllo globale](#36-decisioni-sul-flusso-di-controllo-globale) | [Sessione](#361-gestione-della-sessione-utente), [navigazione](#362-navigazione-tra-viste), [asincronia](#363-gestione-asincrona-ed-eventi), [errori](#364-gestione-degli-errori) |
-| [Condizioni limite](#37-condizioni-limite) | Identità, luoghi, segnalazioni duplicate, rete, input e geolocalizzazione |
-| [Servizi del sottosistema](#servizi-del-sottosistema) | [Identità](#41-autenticazione-utente), [luoghi](#42-gestione-dei-luoghi), [accessibilità](#43-informazioni-di-accessibilità), [percorsi](#44-pianificazione-dei-percorsi), [segnalazioni](#45-segnalazioni-e-moderazione), [geolocalizzazione e aggiornamenti](#46-geolocalizzazione-sincronizzazione-e-notifiche) |
-| [Glossario](#glossario) | Termini architetturali e di dominio |
+1. Introduzione
+   - 1.1 Scopo del sistema
+   - 1.2 Obiettivi di progettazione
+   - 1.3 Definizioni, acronimi e abbreviazioni
+   - 1.4 Riferimenti
+   - 1.5 Panoramica
+2. Sistema corrente
+3. Sistema proposto
+   - 3.1 Panoramica
+   - 3.2 Decomposizione del sistema
+     - 3.2.1 Diagramma dei moduli
+   - 3.3 Hardware/software mapping
+   - 3.4 Gestione dei dati persistenti
+     - 3.4.1 PostgreSQL e struttura relazionale
+     - 3.4.2 Object storage
+     - 3.4.3 Meccanismi di sincronizzazione
+   - 3.5 Controllo accessi e sicurezza
+     - 3.5.1 Autenticazione e identità
+     - 3.5.2 Controllo degli accessi ai dati
+     - 3.5.3 Gestione delle immagini
+     - 3.5.4 Protezione da abusi
+   - 3.6 Decisioni sul flusso di controllo globale
+     - 3.6.1 Gestione della sessione utente
+     - 3.6.2 Navigazione tra viste
+     - 3.6.3 Gestione asincrona ed eventi
+     - 3.6.4 Gestione degli errori
+   - 3.7 Condizioni limite
+4. Servizi del sottosistema
+   - 4.1 Autenticazione utente
+   - 4.2 Gestione dei luoghi
+   - 4.3 Informazioni di accessibilità
+   - 4.4 Pianificazione dei percorsi
+   - 4.5 Segnalazioni e moderazione
+   - 4.6 Geolocalizzazione, sincronizzazione e notifiche
+5. Diagrammi di progettazione
+   - 5.1 Diagramma delle classi di design
+   - 5.2 Diagrammi di sequenza di design
+6. Glossario
+
+---
 
 ## INTRODUZIONE
 
 ### 1.1 SCOPO DEL SISTEMA
 
-Questo documento descrive l’architettura software proposta per aegis e dettaglia i componenti, i dati, le interfacce e le decisioni operative che realizzano i requisiti definiti nel [RAD](RAD.md).
+Questo documento descrive l’architettura software di **Aegis** e dettaglia i sottosistemi, i modelli dati, le interfacce e le decisioni progettuali che realizzano i requisiti funzionali e non funzionali definiti nel Documento di Analisi dei Requisiti (RAD).
 
 ### 1.2 OBIETTIVI DI PROGETTAZIONE
 
 | Obiettivo | Criterio architetturale |
 |---|---|
-| Separazione delle responsabilità | Mantenere distinti dominio, casi d’uso e adattatori. |
-| Affidabilità dei dati di accessibilità | Registrare fonte e freschezza. Trattare i dati assenti o scaduti come sconosciuti. |
-| Sostituibilità delle integrazioni | Collegare fonti e provider tramite porte e adattatori. |
-| Tracciabilità della moderazione | Conservare gli eventi decisionali in forma append-only. |
-| Sicurezza e privacy | Applicare autorizzazione server-side, minimizzazione dei dati e controlli sugli upload. |
-| Operatività misurabile | Registrare esiti di sincronizzazione, ritardi delle fonti, errori e stato dei processi asincroni. |
+| Separazione delle responsabilità | Mantenere distinti dominio, casi d’uso e adattatori tramite architettura esagonale (*Ports & Adapters*). |
+| Affidabilità dei dati di accessibilità | Registrare fonte e freschezza. Trattare come sconosciuti i dati assenti o aggiornati da più di 30 giorni. |
+| Sostituibilità delle integrazioni | Collegare fonti GTFS, provider di routing, storage e canali di notifica tramite porte e adattatori isolati. |
+| Tracciabilità della moderazione | Conservare gli eventi decisionali in forma *append-only* nella stessa transazione dell’aggiornamento di stato. |
+| Sicurezza e privacy | Applicare autorizzazione server-side (RBAC), minimizzazione dei dati personali (GDPR) e scansione degli upload. |
+| Operatività misurabile | Registrare esiti di sincronizzazione, ritardi delle fonti, errori e stato dei processi asincroni mediante log strutturati e metriche. |
+
+*Tabella 1.1: Obiettivi di progettazione e relativi criteri architetturali*
 
 ### 1.3 DEFINIZIONI, ACRONIMI E ABBREVIAZIONI
 
 | Termine | Significato |
 |---|---|
-| API | Interfaccia di programmazione applicativa esposta via HTTP. |
-| DTO | Oggetto di trasferimento usato ai confini applicativi. |
-| SRID | Identificatore del sistema di riferimento spaziale. |
-| PostGIS | Estensione spaziale di PostgreSQL. |
-| Jakarta EE | Piattaforma Enterprise Java proposta come base applicativa. La baseline proposta è Jakarta EE 11 con Java SE 21 LTS e WildFly 42 standard. Versione Java, runtime e distribuzione devono essere approvati secondo OPEN-08 prima della build applicativa. |
-| Jakarta Faces | Tecnologia Jakarta EE per interfacce server-side basate su componenti. |
-| Facelets | Tecnologia di viste XHTML usata da Jakarta Faces. |
-| Jakarta REST | API Jakarta EE per risorse HTTP REST. |
-| Dato sconosciuto | Informazione assente, scaduta o non valida che non permette di determinare l’accessibilità. |
+| API | Interfaccia di programmazione applicativa esposta via HTTP/HTTPS. |
+| DTO | *Data Transfer Object*, oggetto di trasferimento usato ai confini applicativi. |
+| SRID | *Spatial Reference System Identifier*, identificatore del sistema di riferimento spaziale (WGS84 / EPSG:4326). |
+| PostGIS | Estensione spaziale del database relazionale PostgreSQL. |
+| Jakarta EE | Piattaforma Enterprise Java di riferimento: Jakarta EE 11 con Java SE 21 LTS e application server WildFly 42. |
+| Jakarta Faces | Framework Jakarta EE per interfacce server-side basate su componenti. |
+| Facelets | Tecnologia di viste XHTML accessibili usata da Jakarta Faces. |
+| Jakarta REST | API Jakarta EE per l’esposizione di risorse HTTP RESTful. |
+| Dato sconosciuto | Informazione assente, scaduta (> 30 giorni) o incoerente che non permette di determinare l’accessibilità. |
+
+*Tabella 1.2: Definizioni, acronimi e abbreviazioni*
 
 ### 1.4 RIFERIMENTI
 
-| Riferimento | Uso e stato |
+| Riferimento | Ruolo nel progetto |
 |---|---|
-| [RAD: Documento di Analisi dei Requisiti](RAD.md) | Requisiti, attori, casi d’uso e vincoli. |
-| [Template RAD/SDD convertito](template.md) | Struttura accademica di riferimento. |
-| [Roadmap documentale e ingegneristica](MILESTONES.md) | Decisioni e prove ancora aperte, con responsabili e criteri di chiusura. |
-| [Jakarta EE 11](https://jakarta.ee/release/11/) | Piattaforma e versione minima Java supportata. |
-| [Compatibilità WildFly 42](https://www.wildfly.org/news/2026/10/22/WildFly-42-is-released/) | Profili EE 11 supportati e combinazioni Java dichiarate dal progetto WildFly. |
-| [Roadmap di supporto Java SE di Oracle](https://www.oracle.com/java/technologies/java-se-support-roadmap.html) | Versioni Java classificate LTS da Oracle; il supporto dipende dalla distribuzione scelta. |
-| [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | Criteri di accessibilità citati dal RAD come baseline proposta. |
-| Specifica OpenAPI | Da generare e versionare insieme all’API. |
-| Documentazione Jakarta EE e PostGIS | Riferimenti tecnici da associare alle versioni selezionate. |
+| RAD – Documento di Analisi dei Requisiti (Aegis) | Specifica completa di requisiti funzionali, non funzionali, attori, casi d’uso e vincoli di dominio. |
+| Jakarta EE 11 e Java SE 21 LTS | Piattaforma applicativa backend e runtime di esecuzione su server WildFly 42. |
+| PostgreSQL 16 e PostGIS 3.4 | DBMS relazionale ed estensione geospaziale per la persistenza. |
+| WCAG 2.1 livello AA | Baseline tecnica di accessibilità adottata per tutte le viste web e i flussi utente. |
+| Regolamento (UE) 2016/679 (GDPR) e Legge 4/2004 | Quadro normativo per protezione dei dati personali e accessibilità degli strumenti informatici. |
+| Specifica OpenAPI 3.1 | Contratto formale delle API REST esposte dal sistema. |
+
+*Tabella 1.3: Riferimenti tecnici e normativi*
 
 ### 1.5 PANORAMICA
 
-Il documento descrive il contesto attuale, l’architettura proposta, la decomposizione dei moduli, la mappatura hardware/software, la persistenza, il controllo accessi, il flusso globale, le condizioni limite e i servizi dei sottosistemi.
+Il documento è organizzato in 6 capitoli: il Capitolo 1 definisce scopo e obiettivi di progettazione; il Capitolo 2 inquadra l’assenza di sistemi preesistenti (*greenfield*); il Capitolo 3 descrive l’architettura proposta, la decomposizione in moduli, il mapping hardware/software, la persistenza, la sicurezza e il flusso di controllo; il Capitolo 4 specifica i servizi dei sottosistemi; il Capitolo 5 presenta i diagrammi UML di design (classi e sequenze); il Capitolo 6 raccoglie il glossario tecnico.
 
 ## SISTEMA CORRENTE
 
-Il progetto è greenfield: non è stato fornito un sistema esistente da descrivere o migrare. Prima del pilota saranno censiti i servizi di trasporto, i dataset disponibili e i flussi di segnalazione già in uso nell’area geografica selezionata.
+Il progetto è di tipo **greenfield** (sviluppo ex novo): non esiste un sistema preesistente da migrare o integrare come legacy. L’architettura viene progettata da zero per acquisire i feed ufficiali GTFS del trasporto pubblico locale dell’area metropolitana di Napoli e affiancarli alle segnalazioni georeferenziate degli utenti.
 
 ## SISTEMA PROPOSTO
 
 ### 3.1 PANORAMICA
 
-aegis è una web app responsive per consultare l’accessibilità di luoghi e servizi di trasporto, pianificare spostamenti e inviare segnalazioni. Le viste server-side usano Jakarta Faces e Facelets. Le API REST usano Jakarta REST. La persistenza geografica usa PostgreSQL con PostGIS. Le immagini sono archiviate in object storage e le sincronizzazioni e attività lente sono svolte da worker.
+**Aegis** è una web app responsive progettata secondo un’architettura a livelli disaccoppiata (*Domain*, *Application*, *Adapters*). Le viste web server-side sono realizzate con **Jakarta Faces** e **Facelets**, mentre le API HTTP/JSON sono esposte tramite **Jakarta REST** su runtime **Java SE 21 LTS / Jakarta EE 11 (WildFly 42)**. La persistenza transazionale e geospaziale è affidata a **PostgreSQL 16 con PostGIS 3.4**, la cache di lettura a **Redis**, l’archiviazione delle immagini a uno storage compatibile **S3** e le operazioni asincrone (importazioni GTFS, riconciliazione upload e invio notifiche) a **worker Java dedicati**.
 
-La baseline applicativa proposta è Jakarta EE 11 con Java SE 21 LTS e WildFly 42 standard, come combinazione iniziale per le API Faces e REST previste. Jakarta EE 11 supporta Java SE 17 o successivo. Il progetto WildFly dichiara la compatibilità EE 11 di WildFly 42 su Java SE 17 e 21, ma raccomanda Java SE 25 e non dichiara la compatibilità EE 11 su tale versione. Java SE 21 è LTS secondo la roadmap Oracle. La combinazione 21/42 è una proposta per allineare runtime e compatibilità EE dichiarata, non una scelta approvata. OPEN-08 deve confermare la compatibilità richiesta, la distribuzione JDK, il modello di supporto, il runtime e gli ambienti prima dell’avvio della build applicativa. Provider di routing e fonti di trasporto seguono OPEN-03 e OPEN-01. Canali di notifica e servizi gestiti seguono OPEN-08. Le integrazioni restano sostituibili tramite porte applicative.
-
-Il browser riceve HTML per le viste e JSON per le API. La mappa usa una libreria cartografica client-side, mentre i dati di luoghi e accessibilità provengono dall’API. Consultazione, invio delle segnalazioni e tracking tramite codice sono pubblici e non richiedono un account. L’autenticazione è richiesta per preferiti, notifiche, storico personale e operazioni amministrative. La protezione del codice di tracking, i ruoli e le transizioni di moderazione seguono le decisioni ancora aperte in OPEN-04 e OPEN-12.
+Il browser riceve markup HTML semantico e accessibile (WCAG 2.1 AA) per le viste e payload JSON dalle API REST. La mappa interattiva utilizza una libreria cartografica client-side affiancata da una vista tabellare/testuale equivalente sincronizzata sugli stessi dati. La consultazione pubblica, l’invio di segnalazioni e il tracking tramite codice sono accessibili all’Ospite senza registrazione (protetti da rate limiting e idempotenza), mentre preferiti, notifiche, storico personale e pannello di moderazione richiedono autenticazione e verifica dei ruoli lato server.
 
 ### 3.2 DECOMPOSIZIONE DEL SISTEMA
 
-La tabella collega i requisiti del [RAD](RAD.md#32-requisiti-funzionali) ai moduli proposti. I riferimenti NFR indicano responsabilità architetturali da verificare, non requisiti già soddisfatti dall’implementazione.
+La tabella seguente mappa i moduli architetturali sui requisiti funzionali, non funzionali e casi d’uso del RAD.
 
-| Modulo | Responsabilità | Requisiti funzionali e casi d’uso | Requisiti di qualità |
+| Modulo | Responsabilità architetturale | Requisiti funzionali e casi d’uso | Requisiti di qualità |
 |---|---|---|---|
-| Places | Gestire luoghi, fermate e stazioni e fornire ricerche geospaziali. | FR-01, FR-06, UC-02 | NFR-08, NFR-10 |
-| Accessibility | Gestire caratteristiche, stato, fonte, timestamp e validità. | FR-02, FR-03, UC-01, UC-02 | NFR-08 |
-| Routing | Validare richieste, invocare il provider e mostrare l’incertezza dei tratti. | FR-04, FR-05, UC-01 | NFR-08, NFR-10 |
-| Reports | Creare segnalazioni e consentire il tracking pubblico tramite codice senza esporre dati personali. | FR-07, FR-08, UC-03, UC-04 | NFR-04, NFR-06, NFR-07 |
-| Moderation | Applicare le autorizzazioni e validare le transizioni conservando la cronologia append-only. | FR-09, UC-05 | NFR-04, NFR-05, NFR-06 |
-| Identity | Gestire autenticazione, registrazione, ruoli e separazione dei dati identificativi. | FR-13 (UC-05–UC-08), FR-14 (UC-07–UC-09), FR-15 (UC-08) | NFR-04, NFR-05 |
-| Integrations | Implementare adattatori per fonti di trasporto, routing, notifiche e storage. | FR-10 (UC-06), FR-12 (UC-05, UC-08) | NFR-07, NFR-12 |
-| Worker | Eseguire sincronizzazioni schedulate, riconciliare upload e inviare notifiche in modo asincrono e recuperabile. | FR-07 (UC-03), FR-10, FR-11, UC-06, FR-12 (UC-05, UC-08) | NFR-07, NFR-09, NFR-10 |
-| Web | Fornire viste accessibili in Facelets con mappa, alternative testuali, moduli e pannello di moderazione. | FR-01–FR-09, FR-13–FR-15, UC-01–UC-09 | NFR-01, NFR-02, NFR-03, NFR-10, NFR-13 |
-| Runtime e Operations | Gestire configurazione, distribuzione, osservabilità, migrazioni e ripristino. | Nessun caso d’uso diretto | NFR-05, NFR-09, NFR-10, NFR-12 |
+| `places` | Gestire luoghi, fermate e stazioni ed eseguire ricerche geospaziali su PostGIS. | FR-01, FR-06, UC-02 | NFR-08, NFR-10 |
+| `accessibility` | Gestire caratteristiche di accessibilità, stato, fonte, timestamp e regola di scadenza a 30 giorni. | FR-02, FR-03, UC-01, UC-02 | NFR-08 |
+| `routing` | Validare richieste di viaggio, invocare il provider esterno e classificare l’incertezza dei tratti. | FR-04, FR-05, UC-01 | NFR-08, NFR-10 |
+| `reports` | Gestire creazione idempotente delle segnalazioni, upload sicuro e tracking pubblico tramite codice non enumerabile. | FR-07, FR-08, UC-03, UC-04 | NFR-04, NFR-06, NFR-07 |
+| `moderation` | Applicare i controlli di ruolo e validare le transizioni di stato conservando lo storico *append-only*. | FR-09, UC-05 | NFR-04, NFR-05, NFR-06 |
+| `identity` | Gestire registrazione, autenticazione, sessioni, ruoli RBAC, preferiti e consensi alle notifiche. | FR-13, FR-14, FR-15, UC-05–UC-09 | NFR-04, NFR-05 |
+| `integrations` | Implementare gli adattatori verso fonti GTFS, provider di routing, storage S3 e canali di notifica. | FR-10, FR-12, UC-01, UC-03, UC-05, UC-06 | NFR-07, NFR-12 |
+| `worker` | Eseguire importazioni GTFS schedulate/manuali, pulizia cache, riconciliazione upload e invio notifiche dall’outbox. | FR-07, FR-10, FR-11, FR-12, UC-03, UC-05, UC-06 | NFR-07, NFR-09, NFR-10 |
+| `web` | Fornire viste Facelets accessibili (WCAG 2.1 AA) con mappa, alternative testuali, moduli e pannello amministrativo. | FR-01–FR-09, FR-13–FR-15, UC-01–UC-09 | NFR-01, NFR-02, NFR-03, NFR-10, NFR-13 |
 
-NFR-12 è trasversale: separazione tra dominio, casi d’uso e adattatori e documentazione delle API riguardano i moduli applicativi.
+*Tabella 3.1: Decomposizione del sistema in moduli e tracciabilità verso il RAD*
 
-La struttura applicativa proposta organizza il codice Java per domini e separa `domain`, `application` e `adapter`. Le entità e i value object dovranno contenere invarianti. I casi d’uso dovranno orchestrare le operazioni e dipendere da porte. Gli adattatori dovranno implementare accesso HTTP, persistenza e integrazioni. DTO HTTP, modello di dominio e modello di persistenza resteranno separati.
+Internamente, ciascun dominio applicativo è organizzato in tre package:
 
-La struttura dei package proposta è `places`, `accessibility`, `routing`, `reports`, `identity`, `integrations` e `shared`, ciascuno articolato secondo le responsabilità effettive. La collocazione dettagliata dei componenti web e dei worker dipende dalla selezione del runtime e dal packaging applicativo.
+- `domain`: entità, value object immutabili, enumerazioni e regole di invariante pure (prive di dipendenze da framework).
+- `application`: casi d’uso (`*Control`), coordinamento transazionale e porte (*interfaces*) verso persistenza e servizi esterni.
+- `adapter`: implementazioni concrete per risorse Jakarta REST, controller Jakarta Faces, repository JPA/PostGIS, client HTTP e storage S3.
 
 #### 3.2.1 DIAGRAMMA DEI MODULI
 
-Il diagramma mostra il browser e il runtime Jakarta EE, i moduli applicativi, le porte verso le dipendenze sostituibili e i sistemi persistenti.
-
 ```mermaid
 flowchart TB
-  accDescr: Browser e runtime si collegano ai moduli, alla persistenza e ai provider esterni tramite adattatori.
-  Browser[Browser: Facelets, HTML, JavaScript accessibile]
-  Runtime[Runtime Jakarta EE]
-  Faces[Jakarta Faces e Facelets]
-  Rest[API Jakarta REST]
-  Places[Places e Accessibility]
+  Browser[Browser: Facelets, HTML/ARIA, JS]
+  Ingress[Reverse Proxy / Terminazione TLS]
+  Faces[Modulo Web: Jakarta Faces e Facelets]
+  Rest[API Gateway: Jakarta REST]
+  Places[Places & Accessibility]
   Routing[Routing]
-  Reports[Reports e Moderation]
+  Reports[Reports & Moderation]
   Identity[Identity]
-  Worker[Worker asincroni]
-  Integrations[Adattatori di integrazione]
-  Database[(PostgreSQL e PostGIS)]
-  Storage[(Object storage)]
-  Cache[(Cache geospaziale)]
-  Transit[Fonti ufficiali di trasporto]
+  Worker[Worker Asincroni]
+  Integrations[Adapters di Integrazione]
+  Database[(PostgreSQL 16 + PostGIS)]
+  Storage[(Object Storage S3)]
+  Cache[(Cache Redis)]
+  Transit[Fonti ufficiali GTFS]
   RouteProvider[Provider di routing]
-  GeoProvider[Provider di geocodifica]
-  Notify[Canali di notifica]
+  Notify[Canali di notifica Email/Push]
 
-  Browser --> Faces
-  Browser --> Rest
-  Runtime --> Faces
-  Runtime --> Rest
+  Browser -->|HTTPS| Ingress
+  Ingress --> Faces
+  Ingress --> Rest
+  Faces --> Places
+  Faces --> Routing
+  Faces --> Reports
+  Faces --> Identity
   Rest --> Places
   Rest --> Routing
   Rest --> Reports
   Rest --> Identity
+  Worker --> Places
+  Worker --> Reports
   Worker --> Integrations
   Worker --> Cache
   Places --> Database
   Places --> Cache
   Reports --> Database
-  Identity --> Database
   Reports --> Storage
-  Places --> Integrations
+  Identity --> Database
   Routing --> Integrations
   Integrations --> Transit
   Integrations --> RouteProvider
-  Integrations --> GeoProvider
   Integrations --> Notify
 ```
 
+*Figura 3.1: Diagramma dei moduli e delle dipendenze architetturali*
+
 ### 3.3 HARDWARE/SOFTWARE MAPPING
 
-| Nodo | Hardware e software | Responsabilità |
+| Nodo | Ambiente e software | Responsabilità |
 |---|---|---|
-| Dispositivo client | Browser desktop o mobile e tecnologie assistive. | Renderizzare le viste, interagire con la mappa e inviare richieste HTTPS. |
-| Container applicativo | Runtime Jakarta EE da selezionare secondo OPEN-08. La baseline proposta è Jakarta EE 11, Java SE 21 LTS e WildFly 42 standard. Jakarta Faces, Facelets e Jakarta REST. | Servire viste e API e coordinare i casi d’uso. |
-| Container worker | Processo Java compatibile con la piattaforma scelta. | Sincronizzare fonti e gestire attività lente e retry. |
-| Database | PostgreSQL con PostGIS. | Conservare entità, eventi e geometrie. |
-| Object storage | Servizio compatibile con il protocollo S3. Implementazione da selezionare. | Conservare immagini in modo controllato e con scadenza. |
-| Ingress e distribuzione | Terminazione TLS e CDN secondo l’ambiente. | Instradare il traffico verso l’applicazione e distribuire risorse statiche. |
-| Servizi esterni | Fonti ufficiali, provider di routing e canali di notifica da selezionare. | Fornire dati e capacità integrate tramite adattatori. |
+| Dispositivo client | Browser desktop o mobile (Chrome, Firefox, Safari, Edge) e screen reader. | Renderizzare viste HTML/Facelets, interagire con mappa ed elenco testuale ed effettuare chiamate HTTPS. |
+| Reverse Proxy / Ingress | Nginx / Load Balancer con terminazione TLS 1.3. | Gestire certificati HTTPS, instradare le richieste verso l’application server e applicare rate limiting perimetrale. |
+| Application Server | Container Linux con Java SE 21 LTS, Jakarta EE 11 e WildFly 42. | Eseguire viste Jakarta Faces, endpoint Jakarta REST e logica dei casi d’uso. |
+| Worker Node | Container Linux con runtime Java SE 21 LTS. | Eseguire sincronizzazioni GTFS, riconciliazione upload S3 e consumo asincrono di `notification_outbox`. |
+| Database Server | PostgreSQL 16 con estensione spaziale PostGIS 3.4. | Persistenza relazionale e geospaziale (SRID 4326), vincoli di integrità e transazioni ACID. |
+| Cache Server | Redis 7. | Memorizzare risultati di ricerca luoghi/accessibilità indicizzati per vettore di generazioni attive. |
+| Object Storage | Servizio compatibile S3 (MinIO in sviluppo / AWS S3 in produzione) e ClamAV. | Archiviare in bucket privato le immagini allegate alle segnalazioni e scansionarle prima della pubblicazione. |
+| Servizi esterni | Endpoint HTTPS di dataset GTFS, Provider di routing e Gateway notifiche. | Fornire dati ufficiali TPL, calcolo itinerari e recapito notifiche agli utenti consenzienti. |
 
-In sviluppo è previsto Docker Compose con PostgreSQL/PostGIS e storage locale compatibile S3. Staging e produzione sono ambienti separati. L’obiettivo di produzione prevede container applicativi gestiti, database con backup automatici, object storage, CDN e gestione centralizzata dei segreti. Provider e topologia seguono OPEN-08. Dimensionamento e obiettivi di ripristino seguono OPEN-07 e OPEN-08. La proposta non attesta la disponibilità di questi ambienti.
+*Tabella 3.2: Mappatura hardware/software dei nodi di sistema*
 
-La pipeline di rilascio dovrà compilare e verificare gli artefatti applicativi, eseguire test e scansioni delle dipendenze, creare immagini versionate e distribuire progressivamente. Le migrazioni devono mantenere la compatibilità con le versioni applicative attive durante il rilascio. La configurazione applicativa dovrà essere versionata e distinta per ambiente. I segreti non dovranno essere inclusi nel repository.
+```mermaid
+flowchart LR
+  subgraph Client["«device» Dispositivo Utente"]
+    Browser["«artifact» Browser Web / Screen Reader"]
+  end
 
-Le procedure operative per rilascio, migrazione, rollback, incidenti e ripristino sono da redigere e provare in base al runtime e agli ambienti selezionati. Come struttura si può usare il [modello di runbook](template/RUNBOOK.md). Il modello non rappresenta procedure già operative. Log, metriche, allarmi, retry, backup, prove di ripristino e recupero degli esiti ambigui seguono OPEN-05, OPEN-07 e OPEN-08.
+  subgraph Edge["«executionEnvironment» Ingress"]
+    Proxy["«artifact» Reverse Proxy TLS"]
+  end
+
+  subgraph AppCluster["«executionEnvironment» Cluster Applicativo"]
+    WildFly["«artifact» WildFly 42 (Jakarta EE 11 / Java 21)"]
+    WorkerNode["«artifact» Aegis Worker (Java 21)"]
+  end
+
+  subgraph DataTier["«executionEnvironment» Persistenza e Storage"]
+    PG["«artifact» PostgreSQL 16 + PostGIS"]
+    Redis["«artifact» Redis Cache"]
+    S3["«artifact» Bucket S3 Privato + Scanner"]
+  end
+
+  subgraph External["«system» Servizi Esterni"]
+    GTFS["Feed GTFS Ufficiale"]
+    Router["Provider Routing"]
+    Mail["Gateway Notifiche"]
+  end
+
+  Browser -->|HTTPS / TLS 1.3| Proxy
+  Proxy -->|HTTP/2| WildFly
+  WildFly -->|JDBC / TCP| PG
+  WildFly -->|RESP / TCP| Redis
+  WildFly -->|S3 API / HTTPS| S3
+  WildFly -->|HTTPS / JSON| Router
+  WorkerNode -->|JDBC / TCP| PG
+  WorkerNode -->|RESP / TCP| Redis
+  WorkerNode -->|S3 API / HTTPS| S3
+  WorkerNode -->|HTTPS| GTFS
+  WorkerNode -->|HTTPS / SMTP| Mail
+```
+
+*Figura 3.2: Diagramma di deployment di Aegis*
+
+In ambiente di sviluppo l’intera topologia è orchestrata tramite **Docker Compose** (WildFly, Worker, PostgreSQL/PostGIS, Redis, MinIO e ClamAV), mentre in produzione i container applicativi e worker sono eseguiti in modalità stateless dietro load balancer con backup automatici giornalieri del database e replicazione dello storage S3.
 
 ### 3.4 GESTIONE DEI DATI PERSISTENTI
 
-La persistenza relazionale proposta usa PostgreSQL e PostGIS. Le migrazioni dovranno essere versionate e rimanere compatibili con le versioni applicative durante il rilascio progressivo. Le entità di dominio non dovranno dipendere dal modello relazionale. Gli adattatori di persistenza le convertiranno nel modello dati.
+La persistenza relazionale utilizza **PostgreSQL 16 con PostGIS 3.4**. Le migrazioni dello schema sono versionate tramite **Flyway** ed eseguite in modalità retrocompatibile. Le entità del package `domain` sono mappate sulle tabelle mediante adattatori JPA/Hibernate isolati nel layer `adapter`.
 
 #### 3.4.1 POSTGRESQL E STRUTTURA RELAZIONALE
 
-| Tabella | Contenuto e relazioni |
+| Tabella | Contenuto, chiavi e vincoli principali |
 |---|---|
-| `place` | Luogo, fermata o stazione con nome, tipo e geometria a SRID esplicito. |
-| `accessibility_feature` | Tipo, stato, fonte, validità e timestamp della caratteristica. Riferimento a `place`. |
-| `data_source` | Fonte autorizzata, responsabile, configurazione di aggiornamento, regola di validità e riferimento alla generazione attiva. Schema e modalità di gestione da convalidare secondo OPEN-01 e OPEN-14. |
-| `transit_line` | Linee importate e relativi riferimenti alla fonte. |
-| `transit_stop` | Fermate, geometrie e relazioni con le linee e la fonte. |
-| `report_submission` | Prenotazione durevole con scope, digest della chiave, impronta dell’intera richiesta, stato e riferimento al report completato. Un vincolo di unicità su scope e digest impedisce prenotazioni concorrenti duplicate. La prenotazione è persistita prima di effetti esterni. Scope, durata, accesso e conservazione seguono OPEN-04, OPEN-05 e OPEN-08. |
-| `report` | Geometria o luogo, categoria, descrizione, stato e date. È collegato alla prenotazione che ne ha originato la creazione. Dati identificativi separati. |
-| `report_event` | Eventi append-only con autore, data, decisione e riferimento a eventuale duplicato. |
-| `report_attachment` | Intento durevole di upload correlato alla prenotazione della richiesta, chiave opaca di un oggetto privato, esiti di validazione e scansione, stato di associazione al report e lavoro di recupero o pulizia. Stati, accessi e conservazione seguono OPEN-05, OPEN-08 e OPEN-15. |
-| `notification_outbox` | Intenzioni di notifica registrate nella stessa transazione del report e dell’evento iniziale oppure della transizione e dell’evento di moderazione. Stato, tentativi e riferimenti tecnici necessari al recupero. Destinatario, contenuto, accesso e conservazione dipendono dalle policy OPEN-04, OPEN-05 e OPEN-08. |
-| `user_account` | Riferimento d’identità e ruoli con accesso limitato. |
-| `source_sync` | Fonte, versione, timestamp, esito, controlli di qualità, generazione pubblicata, generazione precedente e stato del lavoro durevole di pulizia cache. |
+| `place` | Luogo, fermata o stazione (`id` UUID PK, `name`, `place_type`, `geom` `GEOMETRY(Point, 4326)` con indice GiST). |
+| `accessibility_feature` | Caratteristica di accessibilità (`id` UUID PK, `place_id` FK, `source_id` FK, `generation_id` FK, `feature_type`, `state`, `observed_at`, `valid_until`). |
+| `data_source` | Fonte autorizzata (`id` UUID PK, `name`, `version`, `validity_days` default 30, `active_generation_id` FK). |
+| `source_sync` | Registro sincronizzazioni (`id` UUID PK, `source_id` FK, `version`, `result`, `started_at`, `completed_at`, `error_detail`, `cache_cleaned` boolean). |
+| `transit_line` | Linea di trasporto (`id` UUID PK, `external_id`, `name`, `source_id` FK, `generation_id` FK). |
+| `transit_stop` | Fermata (`id` UUID PK, `place_id` FK, `geom` `GEOMETRY(Point, 4326)`, `source_id` FK, `generation_id` FK). |
+| `report_submission` | Prenotazione idempotente dell’invio (`id` UUID PK, `client_scope`, `idempotency_key_hash`, `payload_digest`, `status`, `report_id` FK nullable, `created_at`). Vincolo `UNIQUE(client_scope, idempotency_key_hash)`. |
+| `report` | Segnalazione (`id` UUID PK, `place_id` FK nullable, `author_id` FK nullable verso `user_account`, `duplicate_of_id` FK nullable, `category`, `description`, `geom` `GEOMETRY(Point, 4326)`, `status`, `tracking_code_hash` UNIQUE, `observed_at`, `created_at`). |
+| `report_event` | Storico *append-only* (`id` UUID PK, `report_id` FK, `actor_id` FK nullable, `event_type`, `motivation`, `occurred_at`). Protetto da revoca dei permessi `UPDATE`/`DELETE` al ruolo applicativo. |
+| `report_attachment` | Allegato foto (`id` UUID PK, `submission_id` FK, `report_id` FK nullable, `storage_key` UNIQUE, `mime_type`, `size_bytes`, `scan_result`, `state`, `created_at`). |
+| `user_account` | Utente registrato o amministratore (`id` UUID PK, `email` UNIQUE, `password_hash`, `created_at`). |
+| `user_role` | Ruoli assegnati (`user_id` FK, `role` enum `REGISTERED_USER` / `ADMINISTRATOR`, PK composta). |
+| `favorite_place` | Luoghi seguiti dall’utente (`user_id` FK, `place_id` FK, `notifications_consent` boolean, `added_at`, PK composta). |
+| `notification_outbox` | Coda transazionale delle notifiche (`id` UUID PK, `report_id` FK, `event_type`, `status`, `retry_count`, `next_attempt_at`, `created_at`). |
 
-La matrice seguente descrive il trattamento progettato. Non definisce basi giuridiche, consensi o tempi di conservazione. Finalità, accessi, scadenze e cancellazione devono essere approvati secondo OPEN-04 e OPEN-05 prima dell’implementazione.
+*Tabella 3.3: Schema relazionale e geospaziale in PostgreSQL/PostGIS*
 
-| Categoria | Dati previsti e uso | Accesso progettato |
-|---|---|---|
-| Identità e ruoli | Riferimento al provider d’identità e permessi associati agli account per autorizzare le funzioni riservate. Il provider non è selezionato. L’ospite usa le funzioni pubbliche senza account. | Utente registrato e amministratore autenticati secondo OPEN-04. |
-| Richieste di percorso e geolocalizzazione | Origine e destinazione testuali o coordinate, preferenze e vincoli di accessibilità per calcolare un percorso. Sono elaborati durante la richiesta e non persistiti nel dominio dopo la risposta. Il provider selezionato può ricevere i soli campi necessari secondo il contratto OPEN-03. Log, telemetria, accesso, conservazione e trattamento del provider restano da approvare in OPEN-05 e OPEN-08. | Ospite, utente registrato e servizi applicativi. Il provider riceve solo i campi necessari previsti dal contratto approvato. |
-| Segnalazione | Luogo, categoria, descrizione, data e stato per moderare e comunicare informazioni sulle barriere. Testo e posizione possono identificare una persona. | Amministratori autorizzati e viste pubbliche limitate ai campi approvati. |
-| Eventi di moderazione | Riferimento all’autore, data, decisione e segnalazione per mantenere la cronologia append-only. | Amministratori autorizzati e ruoli operativi autorizzati. |
-| Credenziale di tracking | Codice restituito a chi invia una segnalazione per consultare lo stato consentito. Memorizzazione e scadenza non sono definite. | Possessore autorizzato secondo OPEN-04. Il codice non va registrato nei log. |
-| Immagine allegata | File, metadati necessari, intento durevole e stato della scansione per documentare una barriera e supportare la moderazione. | Oggetto privato prima dell’associazione autorizzata al report. Pubblicazione secondo policy approvata. |
-| Log operativi | Eventi tecnici e identificativi necessari per diagnosi, sicurezza e misurazione operativa. | Personale operativo autorizzato. |
-
-| Categoria | Decisioni di ciclo di vita |
-|---|---|
-| Identità e ruoli | Definire identificativi persistiti, finalità, accessi, revoca e cancellazione secondo OPEN-04 e OPEN-05. |
-| Richieste di percorso e geolocalizzazione | Definire minimizzazione, eventuale persistenza, trasferimenti al provider, log e telemetria, accesso, conservazione e cancellazione. Il responsabile privacy deve classificare i campi nel contesto d’uso e stabilire se rivelano dati personali relativi alla salute, quali condizioni dell’articolo 9 si applicano e se è necessaria una valutazione d’impatto secondo l’articolo 35. Rivedere OPEN-03, OPEN-05 e OPEN-08. |
-| Segnalazione | Definire campi pubblici, minimizzazione, correzione, scadenza e cancellazione secondo OPEN-05. |
-| Eventi di moderazione | Conservare identificativo del caso, tipo di transizione, esito, timestamp e riferimento all’attore nella forma approvata. Non copiare descrizioni, credenziali, codici di tracking o dati di contatto nel journal. Definire attribuzione, correzione, accessi e cancellazione secondo OPEN-04 e OPEN-05. |
-| Intenzioni di notifica | Definire destinatari, contenuto, accessi, conservazione, cancellazione e trattamento degli esiti secondo OPEN-04, OPEN-05 e OPEN-08. Evitare credenziali e dati personali non necessari. |
-| Credenziale di tracking | Definire memorizzazione, revoca, scadenza e cancellazione secondo OPEN-04 e OPEN-05. |
-| Immagine allegata | Definire consenso, rimozione dei metadati non necessari, conservazione, revoca e cancellazione secondo OPEN-05. |
-| Log operativi | Escludere per impostazione predefinita descrizioni personali, credenziali, codici di tracking, coordinate, preferenze e richieste di percorso. Definire eccezioni motivate, accesso, durata e cancellazione secondo OPEN-05 e OPEN-08. |
-
-La separazione tra identità, contenuto e cronologia è un confine architetturale, non una garanzia di anonimato. Descrizioni, coordinate, preferenze di percorso, immagini e riferimenti agli autori possono identificare una persona. Le richieste di percorso non sono persistite nel dominio dopo la risposta, ma il provider e la telemetria possono trattarne una copia secondo i contratti da approvare. Il responsabile privacy deve valutare se i campi, associati a una persona, rivelano informazioni sulla disabilità o sulla salute e determinare gli obblighi applicabili. La regola di cancellazione deve includere database, object storage, indici, cache, log, provider e copie di backup secondo i rispettivi confini di controllo. Una richiesta di cancellazione è tracciata e autorizzata e si considera conclusa solo quando ogni componente prevista ha registrato l’esito. Il journal conserva il minimo di dati necessario per la tracciabilità e non conserva valori precedenti di contenuti corretti, salvo approvazione esplicita in OPEN-05. La pseudonimizzazione non è dichiarata anonimizzazione. La matrice e le prove del ciclo di vita restano da approvare in OPEN-05.
-
-Le relazioni sono protette da chiavi esterne e vincoli. Le ricerche geografiche usano indici spaziali. Ulteriori indici sono definiti in base alle query validate. Le coordinate di dominio sono rappresentate da `GeoPoint`, value object immutabile con controlli di validità.
-
-La politica di backup e la conservazione delle copie seguono OPEN-05 e OPEN-08. Gli obiettivi di ripristino seguono OPEN-07. Il responsabile operativo deve approvare le regole e registrare le prove di ripristino prima del lancio e dopo modifiche rilevanti all’infrastruttura.
-
-Ogni caratteristica di accessibilità registra fonte, stato, data di aggiornamento e validità. L’assenza o la scadenza produce lo stato sconosciuto. Ogni operazione di moderazione aggiorna lo stato corrente e inserisce l’evento corrispondente nella stessa transazione. Gli eventi non sono modificati né eliminati dall’applicazione ordinaria.
+**Minimizzazione e ciclo di vita dei dati (GDPR).** Le richieste di pianificazione percorso (UC-01) sono elaborate in memoria e non vengono salvate nel database; al provider esterno di routing sono inviate esclusivamente le coordinate/fermate di origine e destinazione e i vincoli di accessibilità tecnici, escludendo identificativi utente e codici di tracking. Nelle segnalazioni (`report`), l’eventuale `author_id` è separato dai campi pubblici ed escluso da tutte le risposte REST pubbliche e dalla pagina di tracking (NFR-04). I log applicativi mascherano automaticamente credenziali, token di tracking, coordinate puntuali e testi liberi delle segnalazioni.
 
 #### 3.4.2 OBJECT STORAGE
 
-Le foto sono conservate fuori dal database in object storage privato. Dopo la validazione sintattica e autorizzativa, ma prima di qualsiasi effetto esterno, il sistema registra in una transazione `report_submission` con scope, digest della chiave, impronta dell’intera richiesta e stato pendente. Un vincolo univoco su scope e digest serializza le prenotazioni concorrenti. L’impronta comprende i campi normalizzati e il digest dei byte dell’eventuale allegato. Il digest dichiarato per l’allegato viene verificato sui byte ricevuti. Il formato canonico e la gestione delle chiavi seguono OPEN-08. Prima di scrivere il file, il sistema registra in `report_attachment` un intento durevole e una chiave opaca non esposta al client. La scrittura, la validazione e la scansione avvengono senza rendere l’oggetto accessibile pubblicamente. Solo dopo un esito valido una transazione database collega l’allegato al report, registra evento e notifica autorizzata e completa la prenotazione con il riferimento al report. Database e object storage non condividono una transazione atomica.
+Le immagini allegate alle segnalazioni (JPEG, PNG o WebP fino a 5 MB) sono archiviate in un bucket **S3 privato** (senza accesso anonimo diretto). Il flusso garantisce consistenza tra database e object storage senza richiedere transazioni distribuite:
 
-Se la scrittura, la scansione o la transazione database falliscono, l’oggetto resta privato e l’intento consente un retry idempotente o la pulizia. La prenotazione mantiene lo stato pendente o recuperabile finché il worker non completa la riconciliazione o registra un esito terminale secondo la policy approvata. Solo il titolare esclusivo della prenotazione può proseguire l’operazione. Un retry concorrente con la stessa chiave e impronta osserva lo stato esistente e non avvia un secondo upload. Un retry con impronta diversa è rifiutato. Un worker riconcilia prenotazione, intento e oggetti usando le chiavi registrate prima della scrittura. Rifiuto, quarantena, retention, retry e cancellazione seguono OPEN-05, OPEN-08 e OPEN-15. Un riferimento mancante o un oggetto non disponibile non produce un link pubblico rotto: l’allegato è escluso dalla risposta e l’anomalia resta osservabile. Stati, tempi e meccanismo di coordinamento esclusivo sono da approvare secondo OPEN-08. Il database conserva riferimenti e metadati necessari, non i byte dell’immagine.
+1. **Prenotazione atomica:** prima di scrivere su S3, il sistema apre una transazione database che inserisce un record `PENDING` in `report_submission` (con chiave di idempotenza e digest SHA-256 del payload e dell’immagine) e un intento in `report_attachment` con una `storage_key` opaca (UUIDv4).
+2. **Upload e scansione:** il file viene caricato nel bucket privato, verificato nei *magic bytes* (corrispondenza tra estensione, tipo MIME e firma binaria) e sottoposto a scansione antivirus tramite **ClamAV**.
+3. **Commit finale:** solo se la scansione ha esito `CLEAN`, una seconda transazione database salva `report`, l’evento iniziale `CREATED` in `report_event`, collega `report_attachment` al `report_id` e marca `report_submission` come `COMPLETED`.
+4. **Riconciliazione e pulizia:** se l’upload o la scansione falliscono (file infetto, corrotto o > 5 MB), l’oggetto viene eliminato o messo in quarantena e l’operazione è rifiutata senza lasciare segnalazioni parziali. Un job periodico del worker scansiona gli intenti `report_attachment` rimasti pendenti oltre 30 minuti ed elimina eventuali oggetti orfani su S3.
 
 #### 3.4.3 MECCANISMI DI SINCRONIZZAZIONE
 
-Worker asincroni importano dati di trasporto e accessibilità tramite adattatori isolati. Ogni esecuzione ha un identificativo e registra fonte, versione, timestamp, esito, controlli di qualità e riferimento alla generazione in `source_sync`. La pubblicazione e la registrazione nello stesso record del lavoro di pulizia cache pendente avvengono nella stessa transazione. Il worker di pulizia recupera i lavori non completati da `source_sync`, registra esito ed eventuale errore e ripete l’operazione in modo idempotente secondo una politica di retry e backoff da definire in OPEN-08. Un arresto dopo il commit non perde quindi la richiesta di pulizia. Retry e replay dell’importazione devono essere idempotenti. La deduplicazione usa le chiavi stabili definite dal contratto della fonte. Se la fonte non fornisce chiavi stabili, la regola di riconciliazione deve essere approvata secondo OPEN-14 prima di attivare l’importazione.
+L’importazione dei dataset ufficiali **GTFS** (UC-06) avviene tramite un meccanismo di **pubblicazione atomica per generazioni** che impedisce letture parziali o incoerenti:
 
-I dati acquisiti sono scritti in una generazione candidata isolata dalle letture pubbliche. Il worker valida contratto e schema, chiavi, completezza secondo le regole concordate per la fonte e coerenza dei dati. Solo una generazione che supera tutti i controlli può diventare attiva tramite un passaggio atomico. L’attivazione della generazione e la registrazione dell’esito pubblicato avvengono nella stessa transazione. Un errore lascia attiva la generazione pubblicata in precedenza e registra l’esito fallito senza esporre dati parziali. La rappresentazione fisica delle generazioni dipende dal contratto della fonte e dal volume, ma deve preservare isolamento, pubblicazione atomica e recuperabilità.
-
-Frequenza e validità sono definite per ciascuna fonte e tipologia durante la selezione dell’area pilota. I dati oltre la validità sono esposti come sconosciuti. La cache è solo un’ottimizzazione e non estende la validità: ogni lettura rivaluta la scadenza anche in caso di cache hit. Prima della cache, ogni lettura acquisisce dal repository autorevole, in una vista consistente, gli identificativi delle generazioni attive per tutte le fonti coinvolte. La chiave cache include il vettore completo delle generazioni, l’area e i parametri normalizzati della query. In caso di cache miss, dati e provenienza sono letti usando lo stesso snapshot del vettore. Una pubblicazione concorrente non può quindi comporre una risposta con dati riferiti a generazioni diverse da quelle della chiave. Dopo un commit, una lettura successiva non può selezionare le chiavi del vettore superato, anche se la pulizia fisica è ancora pendente. I risultati di routing composti non sono memorizzati in questa cache. Frequenze, validità e criteri di aggiornamento urgente restano aperti in OPEN-02.
-
-Il worker elimina le chiavi delle generazioni non più attive dopo il commit. Un fallimento lascia il lavoro pendente e osservabile in `source_sync` per un tentativo successivo. La pulizia fisica è idempotente. La correttezza della lettura non dipende dalla sua conclusione, poiché una chiave obsoleta non corrisponde alla generazione attiva. Aggiornamenti urgenti rendono così non selezionabili i dati precedenti al commit. L’ordinamento delle generazioni concorrenti segue la versione della fonte quando disponibile. In assenza di una versione confrontabile, gli aggiornamenti della stessa fonte sono serializzati secondo una regola da approvare in OPEN-14.
+1. **Isolamento della generazione candidata:** il worker crea un record `source_sync` con stato `RUNNING` e importa fermate, linee e caratteristiche in una nuova `generation_id` isolata, non ancora referenziata da `data_source.active_generation_id`.
+2. **Validazione integrale:** prima della pubblicazione, il worker verifica integrità dello schema GTFS, chiavi referenziali, validità delle coordinate nel bounding box urbano e soglie minime di completezza.
+3. **Switch atomico:** se tutti i controlli superano la verifica, una singola transazione aggiorna `data_source.active_generation_id` alla nuova generazione e imposta `source_sync.result = SUCCESS` con `cache_cleaned = false`. In caso di errore, la transazione non modifica `active_generation_id`: i dati precedenti restano integralmente consultabili (NFR-09) e l’errore è registrato in `source_sync`.
+4. **Coerenza della cache Redis:** ogni lettura acquisisce preliminarmente gli ID delle generazioni attive delle fonti coinvolte e costruisce la chiave cache includendo tale vettore di generazioni (`gen:<id1>-<id2>:area:<hash>`). Al commit di una nuova generazione, le chiavi precedenti diventano immediatamente non selezionabili; un task asincrono del worker provvede poi alla pulizia fisica delle chiavi obsolete e imposta `cache_cleaned = true`. Anche in caso di *cache hit*, il layer applicativo rivaluta sempre `valid_until` rispetto all’istante corrente (30 giorni dall’osservazione), restituendo `UNKNOWN` per qualsiasi caratteristica scaduta.
 
 ### 3.5 CONTROLLO ACCESSI E SICUREZZA
 
-Il controllo accessi è applicato lato server. Consultazione, invio e tracking tramite codice sono pubblici secondo il RAD. Le operazioni amministrative e le funzioni dell’utente registrato richiedono autenticazione e autorizzazione. OPEN-04 definisce ruoli, identità operative, protezione del codice di tracking e campi restituiti. Campi pubblici, conservazione e consenso delle immagini seguono OPEN-05.
-
 #### 3.5.1 AUTENTICAZIONE E IDENTITÀ
 
-Consultazione, invio di segnalazioni e tracking tramite codice non richiedono un account. Il codice di tracking autorizza la consultazione del solo stato consentito e deve essere trattato come una credenziale: non va registrato nei log. Le regole di generazione, conservazione e accesso al codice sono da approvare in OPEN-04 e OPEN-05. Preferiti, notifiche, storico personale e operazioni amministrative richiedono un’identità autenticata e un permesso verificato lato server. Provider d’identità e protocolli non sono selezionati. Le credenziali e i segreti non sono conservati nei log né nel codice applicativo.
+- **Accesso pubblico:** consultazione luoghi, pianificazione percorsi, invio segnalazioni e tracking non richiedono registrazione. Il codice di tracking è generato tramite `SecureRandom` (128 bit di entropia codificati in Base62, non sequenziale) ed è salvato nel database come hash SHA-256 (`tracking_code_hash`).
+- **Autenticazione e sessione:** utenti registrati e amministratori si autenticano tramite credenziali verificate con algoritmo **Argon2id**. L’autenticazione rilascia una sessione HTTP sicura (cookie `HttpOnly`, `Secure`, `SameSite=Strict`) per le viste Facelets e un token firmato a breve scadenza per le chiamate API autenticate.
 
 #### 3.5.2 CONTROLLO DEGLI ACCESSI AI DATI
 
-Ogni operazione riservata verifica l’autorizzazione sul server. L’accesso ai dati identificativi è separato da quello ai contenuti pubblici delle segnalazioni. Le query sono parametrizzate. Input e transizioni di dominio sono validati. Le migrazioni applicano vincoli relazionali e indici necessari all’integrità e alle query autorizzate.
+Ogni endpoint e azione Facelets verifica identità e ruoli lato server tramite annotazioni Jakarta Security (`@RolesAllowed`):
+
+- Ruolo `REGISTERED_USER`: accesso alla propria area personale, gestione luoghi preferiti, gestione consensi notifiche e consultazione delle proprie segnalazioni (`author_id = currentUser.id`).
+- Ruolo `ADMINISTRATOR`: accesso alla coda di moderazione, esecuzione delle transizioni di stato delle segnalazioni e avvio/monitoraggio delle sincronizzazioni GTFS.
+- Tutte le query SQL/JPQL utilizzano parametri vincolati (*prepared statements*) per prevenire SQL Injection.
 
 #### 3.5.3 GESTIONE DELLE IMMAGINI
 
-Gli upload applicano i limiti e i controlli da approvare in OPEN-15. Il sistema registra un intento durevole prima della scrittura e conserva gli oggetti in un’area privata. I file sono verificati per tipo e contenuto e sottoposti a scansione. Solo un allegato verificato e collegato al report può essere servito secondo autorizzazione. Un errore tra object storage e database non rende pubblico un oggetto orfano: il worker usa l’intento per riprendere o pulire il lavoro in modo idempotente secondo OPEN-08 e OPEN-15. Consenso, finalità, durata di conservazione e cancellazione seguono OPEN-05 e devono essere definiti prima di attivare la pubblicazione.
+Gli allegati sono accettati esclusivamente se rispettano tutti i seguenti vincoli (NFR-07):
+
+- Dimensione massima: **5 MB** (5.242.880 byte) verificata sullo stream in ingresso prima del completamento dell’upload.
+- Formati ammessi: **JPEG** (`image/jpeg`), **PNG** (`image/png`) e **WebP** (`image/webp`), verificati tramite ispezione dei *magic bytes* dell’intestazione del file.
+- Rimozione automatica dei metadati EXIF (inclusa eventuale posizione GPS incorporata nello scatto) prima del salvataggio nel bucket S3, a tutela della privacy dell’utente.
+- Scansione antivirus obbligatoria prima del collegamento al record `report`.
 
 #### 3.5.4 PROTEZIONE DA ABUSI
 
-Gli endpoint applicano rate limiting e validazione server-side. Le richieste non valide sono rifiutate senza effetti parziali. Gli errori non devono rivelare dati riservati o consentire l’enumerazione delle segnalazioni. I log strutturati escludono credenziali, codici di tracking e descrizioni personali. Le azioni amministrative sono sottoposte ad audit.
+- **Rate limiting:** applicato al livello di ingresso e API (ad esempio massimo 10 invii di segnalazione/ora per indirizzo IP per utenti Ospite; massimo 20 richieste/minuto per IP sull’endpoint di tracking per impedire attacchi a dizionario sui codici).
+- **Risposte uniformi:** l’endpoint di tracking restituisce il medesimo errore generico `404 Not Found` sia per codici inesistenti sia per codici formalmente malformati, evitando qualsiasi leak informativo.
 
-**Analisi delle minacce.** La seguente valutazione è iniziale e descrive controlli richiesti, non controlli già implementati o verificati. Limiti quantitativi e scansione degli upload seguono OPEN-15. Conservazione, provider d’identità e fonti autorizzate seguono OPEN-05, OPEN-04 e OPEN-01.
-
-| Scenario di minaccia | Bene e impatto | Controllo progettato | Verifica richiesta |
+| Minaccia | Impatto | Controllo implementato | Verifica |
 |---|---|---|---|
-| Enumerazione dei codici di tracking | Esposizione dello stato o di informazioni personali di segnalazioni altrui. | Usare un token casuale non sequenziale con entropia adeguata al rischio. Limitare le richieste e rendere uniformi gli esiti per codice inesistente e non autorizzato. Non registrare il token nei log. | Prove di autorizzazione, enumerazione e analisi dei log prima del pilota. |
-| Accesso o transizione di moderazione non autorizzati | Modifica fraudolenta di stato e cronologia delle segnalazioni. | Verificare identità e ruolo sul server per ogni operazione. Applicare transizioni ammesse in modo atomico e registrare gli eventi in audit append-only. | Prove negative per ruolo e stato, incluse chiamate dirette alle API e richieste ripetute. |
-| Upload malevolo o non conforme | Esecuzione o diffusione di contenuti ostili, esposizione di dati o abuso dello storage. | Registrare un intento durevole prima della scrittura. Validare tipo effettivo, dimensione e contenuto. Tenere privato l’oggetto, sottoporlo a scansione e pubblicarlo solo dopo associazione autorizzata al report. Riconciliare o pulire in modo idempotente gli intenti incompleti. Limiti, scanner e retention sono da approvare secondo OPEN-05 e OPEN-15. | Prove con file invalidi, contenuti di test, scansione fallita o indisponibile, interruzione dopo scrittura e dopo scansione, errore della transazione database e tentativi di accesso non autorizzato. Verificare la pulizia o il retry senza esposizione pubblica. |
-| Dati di fonte errati, alterati o scaduti | Percorsi o descrizioni di accessibilità che inducono decisioni non sicure. | Importare solo fonti autorizzate, validare schema e qualità, conservare provenienza e validità. Mostrare come sconosciuti i dati assenti o scaduti. | Test di schema, duplicati, aggiornamento fallito, fonte scaduta e propagazione dello stato sconosciuto. |
-| Injection o consumo eccessivo di risorse | Compromissione dei dati o indisponibilità di API e database. | Usare query parametrizzate, validare input, limitare dimensioni e frequenza delle richieste e rendere le operazioni ripetibili in sicurezza. Le soglie sono da approvare in OPEN-15. | Analisi statica, prove di input ostile e carico con soglie approvate. |
-| Divulgazione di dati personali o segreti | Violazione di riservatezza attraverso log, backup, configurazione, oggetti non collegati o risposta API. | Minimizzare i dati, escludere segreti e identificativi dai log, mantenere privati gli upload non collegati, limitare accessi e definire conservazione e cancellazione prima del lancio. Configurazione e segreti sono separati dal codice. | Revisione di log e permessi, controlli di segreti in CI e prove di accesso, recupero e cancellazione di upload interrotti. |
+| Enumerazione codici di tracking | Accesso non autorizzato allo stato di segnalazioni altrui. | Token casuale a 128 bit (Base62), salvataggio tramite hash SHA-256, rate limiting e risposte uniformi. | Test di penetrazione e verifica assenza del codice nei log. |
+| Escalation di privilegi nella moderazione | Alterazione indebita dello stato di accessibilità dei luoghi. | Controllo RBAC lato server (`@RolesAllowed("ADMINISTRATOR")`), validazione macchina a stati e audit *append-only*. | Test funzionali negativi con utenti non autenticati e `REGISTERED_USER`. |
+| Upload di file malevoli o corrotti | Compromissione storage o distribuzione di malware. | Limite 5 MB, verifica *magic bytes* JPEG/PNG/WebP, stripping EXIF, bucket S3 privato e scansione ClamAV. | Test con file rinominati (ad esempio `.exe` in `.jpg`), file > 5 MB e firma EICAR. |
+| Dati GTFS corrotti o scaduti | Indicazione errata di accessibilità su percorsi o stazioni. | Importazione su generazione isolata, validazione pre-commit, switch atomico e scadenza automatica a 30 giorni (`UNKNOWN`). | Test di importazione con file troncati e test temporali oltre i 30 giorni. |
 
-**Sicurezza d'uso e pericoli operativi.** Questa analisi riguarda i danni che possono derivare dall'uso delle informazioni del servizio. È distinta dall'analisi delle minacce informatiche. I controlli descritti sono requisiti di progetto e non risultano implementati o validati. La valutazione del rischio residuo richiede area pilota, fonti e profili d'uso approvati.
-
-| Pericolo | Possibile danno | Controllo progettato | Evidenza richiesta |
-|---|---|---|---|
-| Una caratteristica di accessibilità assente, scaduta o incoerente viene interpretata come disponibile. | La persona sceglie un luogo o un tratto che non può utilizzare. | Propagare lo stato sconosciuto senza convertirlo in accessibile. Mostrare fonte e validità quando disponibili. Escludere il dato incerto dalle dichiarazioni di compatibilità. | Test end-to-end per dato assente, scaduto, incoerente e aggiornamento fallito. Revisione dei testi con persone del profilo pilota. |
-| Un percorso include un tratto non verificato o un fallback del provider. | La persona incontra una barriera o non riesce a completare il tragitto. | Etichettare i tratti non verificati. Rendere visibili le limitazioni e l'origine del percorso. Fornire un esito esplicito quando non è possibile stabilire la compatibilità. | Prove con provider indisponibile, dati parziali e profili approvati. Verifica dell'equivalenza tra mappa e descrizione testuale. |
-| Una sincronizzazione incompleta, duplicata o fuori ordine pubblica uno stato non coerente. | La persona pianifica sulla base di informazioni obsolete o contraddittorie. | Isolare le generazioni candidate, validare contratto e completezza, attivare in modo atomico, preservare la generazione precedente in caso di errore e ordinare le pubblicazioni concorrenti. Rendere osservabili esito e ritardo. | Prove di retry, interruzione in ogni fase, duplicati, pubblicazioni durante una query, coerenza del vettore cache, errore di pubblicazione e ripristino. Confronto tra fonte e dati attivi. |
-| Un avviso o un errore non è percepibile o comprensibile con la modalità d'interazione usata. | La persona non nota l'incertezza o non riesce a scegliere un'alternativa. | Esporre avvisi nel contenuto e nella struttura accessibile, senza affidarsi al solo colore, alla sola mappa o a notifiche temporanee. Mantenere il messaggio disponibile nella vista. | Verifica con tastiera e tecnologie assistive, prove con utenti e controllo che gli stati equivalenti siano disponibili in forma testuale. |
-
-Gli esiti delle verifiche, le limitazioni note e l'accettazione del rischio residuo devono essere registrati prima del pilota. I criteri di accettazione e i profili coinvolti dipendono dalle decisioni OPEN-02, OPEN-03 e OPEN-06.
+*Tabella 3.4: Matrice di analisi delle minacce e controlli di sicurezza*
 
 ### 3.6 DECISIONI SUL FLUSSO DI CONTROLLO GLOBALE
 
-Le viste Facelets e le risorse Jakarta REST costituiscono adattatori. Validano la forma degli input e invocano casi d’uso applicativi. I casi d’uso applicano le regole di dominio, coordinano porte e transazioni e restituiscono risultati tipizzati. Gli adattatori convertono i risultati in viste o DTO HTTP. Le chiamate di rete lente sono eseguite fuori dalle transazioni di database quando possibile.
-
-Le porte applicative includono repository per luoghi e segnalazioni, provider per dati di trasporto e routing, storage e notifiche. Le implementazioni sono selezionabili senza modificare le regole del dominio. OpenAPI documenta le API versionate, gli schemi, gli errori e le regole di accesso.
-
 #### 3.6.1 GESTIONE DELLA SESSIONE UTENTE
 
-La sessione è necessaria solo per le funzioni protette. Il runtime e il meccanismo di identità scelti determineranno durata, rinnovo e terminazione della sessione. La consultazione pubblica non deve dipendere da una sessione autenticata. La policy di sessione e il provider d’identità sono decisioni OPEN-04, da coordinare con la baseline runtime OPEN-08.
+Le richieste pubbliche (UC-01, UC-02, UC-03, UC-04, UC-09) sono servite in modalità *stateless* senza creazione di sessione server-side. La sessione autenticata viene creata esclusivamente al completamento positivo di UC-07 (*Autenticarsi*), con timeout di inattività pari a 30 minuti e invalidazione esplicita al logout.
 
 #### 3.6.2 NAVIGAZIONE TRA VISTE
 
-Jakarta Faces e Facelets gestiscono la navigazione server-side secondo le convenzioni del runtime selezionato. Le viste previste comprendono ricerca, risultati, mappa con elenco testuale, dettaglio luogo, modulo di segnalazione, tracking e pannello di moderazione. Le transizioni riservate applicano i controlli di autorizzazione. I flussi mantengono etichette, focus e annunci accessibili.
-
-Le API REST sono versionate e separate dal contratto delle viste. Un client cartografico riceve dati dall’API e offre una rappresentazione testuale equivalente.
+Jakarta Faces gestisce il flusso delle pagine server-side (Home/Mappa e Ricerca, Dettaglio Luogo, Pianificatore Percorso, Nuova Segnalazione, Tracking Segnalazione, Area Personale, Dashboard Amministratore). Ogni vista espone i dati in doppia modalità sincronizzata (mappa interattiva e tabella HTML semantica con attributi ARIA) per garantire la piena navigabilità da tastiera e screen reader (NFR-01, NFR-02).
 
 #### 3.6.3 GESTIONE ASINCRONA ED EVENTI
 
-Le sincronizzazioni e le attività lente sono eseguite da worker. La transazione di pubblicazione registra anche il lavoro pendente di pulizia cache. Un worker recupera i lavori incompleti da `source_sync` e ne registra l’esito. Le chiavi cache includono la generazione attiva, così un arresto del worker non rende leggibili dati di una generazione superata. Per gli allegati, `report_attachment` conserva l’intento prima della scrittura in object storage e permette di riprendere o pulire un upload anche se la transazione che crea il report fallisce. L’oggetto resta privato fino alla scansione valida e al collegamento autorizzato. Il worker riconcilia intenti e oggetti in modo idempotente secondo OPEN-05, OPEN-08 e OPEN-15. Per FR-12, l’intenzione di notifica è registrata in `notification_outbox` nella stessa transazione che completa la creazione o la moderazione, se le policy autorizzano l’invio. Un worker elabora l’intenzione dopo il commit tramite `NotificationPort`. L’esito è registrato. Un errore non annulla il caso d’uso già persistito e lascia il lavoro osservabile e recuperabile. Il sistema non garantisce consegna esattamente una volta. Se il provider non conferma l’esito in modo idempotente, il lavoro resta in riconciliazione prima di un nuovo tentativo. I log escludono credenziali, codici di tracking, descrizioni delle segnalazioni e dati personali non necessari. Le metriche escludono identificativi personali e valori ad alta cardinalità. Ogni allarme indica impatto, responsabile, procedura e criterio di chiusura. Backup e ripristino coprono database e object storage, verificano integrità e riferimenti e riconciliano i lavori pendenti. Retry, backoff, soglie, canali, conservazione e procedure operative restano da approvare in OPEN-05, OPEN-07 e OPEN-08. Le chiamate a provider esterni non mantengono aperte transazioni database. Metriche e allarmi rendono osservabili disponibilità, latenza, ritardo delle fonti, errori di sincronizzazione, lavori di pulizia cache e upload pendenti, stato ed età delle notifiche pendenti e dimensione e anzianità della coda di moderazione.
+Per evitare di bloccare le richieste HTTP dell’utente e garantire l’atomicità delle operazioni, le attività esterne lente sono disaccoppiate tramite **Transactional Outbox** e **worker asincroni**:
+
+- Quando una segnalazione viene moderata (UC-05), la transazione database aggiorna `report.status`, inserisce il record in `report_event` e scrive un messaggio in `notification_outbox` (se esistono utenti che seguono il luogo o l’autore registrato con consenso attivo).
+- Un worker asincrono interroga periodicamente `notification_outbox` (`status = PENDING`), invia la notifica tramite `NotificationPort` e aggiorna lo stato a `SENT` (oppure incrementa `retry_count` con backoff esponenziale fino a 5 tentativi). Un eventuale guasto temporaneo del server email/push non compromette la transazione di moderazione già confermata (FR-12).
 
 #### 3.6.4 GESTIONE DEGLI ERRORI
 
-Gli errori sono convertiti in una forma HTTP uniforme e in messaggi comprensibili per l’interfaccia. I dettagli interni e i dati personali non sono restituiti al client né registrati nei log. Ogni caso d’uso garantisce le proprie condizioni transazionali: un errore di moderazione non lascia divergenze tra stato e cronologia. Un errore di creazione non lascia una segnalazione parziale. Poiché database e object storage non condividono una transazione, un allegato non collegato resta privato e recuperabile o eliminabile tramite il suo intento durevole. Le viste espongono in modo accessibile stati di caricamento, assenza di risultati ed errore.
-
-La procedura operativa per gli incidenti deve definire rilevazione, escalation, contenimento, ripristino, comunicazioni e registrazione degli esiti prima dell’apertura del servizio.
+Un `ExceptionMapper` centralizzato (per Jakarta REST) e un `ExceptionHandler` dedicato (per Jakarta Faces) intercettano tutte le eccezioni applicative e tecniche, traducendole in codici HTTP standard (`400`, `401`, `403`, `404`, `429`, `500`) e messaggi utente chiari, accessibili tramite `aria-live="assertive"`, senza mai esporre stack trace o dettagli interni del database.
 
 ### 3.7 CONDIZIONI LIMITE
 
-#### 3.7.1 UTENTE NON AUTENTICATO
-
-La consultazione pubblica di luoghi e percorsi resta disponibile. Se un utente non autenticato richiede un’operazione protetta, il sistema rifiuta l’operazione e comunica come accedere alla funzione secondo la policy OPEN-04. L’autorizzazione è verificata lato server.
-
-#### 3.7.2 LUOGO NON TROVATO O IDENTIFICATIVO NON VALIDO
-
-Se un identificativo non corrisponde a un luogo, il sistema restituisce un esito coerente senza dati parziali. Se il luogo esiste ma i dati di accessibilità sono assenti, scaduti o incoerenti, li presenta come sconosciuti e non li usa come prova di compatibilità.
-
-#### 3.7.3 SEGNALAZIONI DUPLICATE
-
-Una segnalazione che descrive un caso già registrato può essere unita al report esistente solo tramite una decisione autorizzata di moderazione. Il sistema conserva entrambe le segnalazioni e registra l’unione nello storico. Non crea una relazione duplicata né sovrascrive eventi precedenti.
-
-#### 3.7.4 INVII RIPETUTI E DUPLICAZIONE DEI DATI IMPORTATI
-
-Retry della creazione e sincronizzazioni ripetute non devono creare segnalazioni o dati di trasporto duplicati. Per l’invio, una transazione prenota in `report_submission` una chiave univoca nello scope e l’impronta canonica dell’intera richiesta prima degli effetti esterni. La stessa prenotazione coordina richieste concorrenti e recuperi. La ripetizione della stessa chiave e dello stesso payload recupera una sola operazione e non duplica report, evento, allegato o intenzione di notifica. Il riuso della chiave con payload diverso è rifiutato senza effetti. Una richiesta ancora in corso non viene eseguita in parallelo. Ambito, durata, formato canonico, stati terminali, recupero del risultato e autorizzazione del replay seguono OPEN-04, OPEN-05 e OPEN-08. Le sincronizzazioni applicano le chiavi stabili e le regole OPEN-14. Un codice di tracking inesistente o non valido non permette di enumerare segnalazioni.
-
-#### 3.7.5 CARICAMENTO LENTO O ASSENZA DI RETE
-
-Le viste mostrano stati di caricamento e un errore accessibile quando rete, API o provider di routing non rispondono. Un fallback di percorso è marcato come non verificato. Se non esistono percorsi compatibili, il sistema comunica l’esito esplicitamente e presenta eventuali alternative con tratti non verificati.
-
-#### 3.7.6 INPUT INCOMPLETI O INVALIDI
-
-Richieste di percorso, moduli e identificativi sono validati prima di produrre effetti. In caso di input incompleto o non valido il sistema restituisce errori comprensibili e non persiste modifiche parziali. Un upload non valido o con scansione fallita viene rifiutato o messo in quarantena e non è reso pubblico. Se la scrittura object storage o la transazione report falliscono, l’intento durevole mantiene l’oggetto privato e consente retry o pulizia idempotente secondo OPEN-08 e OPEN-15. Se il commit riesce ma la risposta si perde, la chiave consente di recuperare l’esito della stessa operazione senza ripeterne gli effetti. La risposta ripetuta non rivela il codice di tracking a un soggetto non autorizzato secondo OPEN-04 e OPEN-05.
-
-#### 3.7.7 PERMESSI DI GEOLOCALIZZAZIONE NEGATI
-
-Se la persona nega il permesso di geolocalizzazione, il sistema non blocca ricerca e pianificazione. L’interfaccia consente di inserire manualmente origine, destinazione o luogo e non conserva la posizione oltre quanto necessario alla richiesta.
+- **Utente non autenticato su funzioni riservate:** restituzione immediata di HTTP `401 Unauthorized` (API) o redirect alla pagina di login (Facelets) con messaggio informativo.
+- **Luogo inesistente o privo di dati:** restituzione di HTTP `404 Not Found` se l’ID luogo non esiste; se il luogo esiste ma le caratteristiche sono assenti o aggiornate da oltre 30 giorni, esposizione esplicita dello stato `UNKNOWN` (*Sconosciuto*).
+- **Segnalazioni duplicate:** unione eseguibile solo dall’Amministratore tramite transizione `In verifica` → `Duplicata` con indicazione di `duplicate_of_id`; entrambe le segnalazioni e i relativi storici restano conservati.
+- **Invii ripetuti (retry di rete):** l’header `Idempotency-Key` associato a `report_submission` garantisce che il ritentativo della stessa richiesta restituisca l’esito già registrato senza creare segnalazioni o allegati duplicati.
+- **Indisponibilità del Provider di routing:** timeout configurato a 3 secondi; in caso di errore o timeout, il sistema comunica l’indisponibilità temporanea del calcolo percorso senza mai presentare itinerari non verificati come accessibili.
+- **Geolocalizzazione negata dal browser:** l’interfaccia abilita automaticamente il campo di ricerca testuale con autocompletamento su fermate e indirizzi, senza memorizzare coordinate sul server.
 
 ## SERVIZI DEL SOTTOSISTEMA
 
 ### 4.1 AUTENTICAZIONE UTENTE
 
-Il sottosistema Identity gestisce autenticazione e autorizzazione delle funzioni protette. L’amministratore deve essere autenticato e avere il permesso di moderazione o gestione della fonte richiesto dall’operazione. Invio e tracking sono pubblici: il tracking usa il codice come credenziale e restituisce solo lo stato consentito. Le regole di protezione del codice e dei campi restituiti restano da approvare in OPEN-04 e OPEN-05. Provider e protocollo di autenticazione sono da selezionare. I dati identificativi restano separati dai contenuti pubblici delle segnalazioni.
+Il sottosistema `identity` espone `AccountAPI` e i casi d’uso `AuthenticateUserControl` e `ManageProfileControl`. Gestisce la registrazione (UC-09) con verifica di unicità dell’email e hashing Argon2id, il login (UC-07) con emissione del contesto di sicurezza e dei ruoli (`REGISTERED_USER`, `ADMINISTRATOR`), nonché la gestione di `FavoritePlace` e del consenso alle notifiche (UC-08).
 
 ### 4.2 GESTIONE DEI LUOGHI
 
-Il sottosistema Places importa e consulta luoghi, fermate e stazioni. Le query geospaziali usano PostGIS e restituiscono geometrie e identificativi secondo il contratto API. La ricerca e il dettaglio sono in sola lettura per i dati ufficiali. Gli aggiornamenti arrivano dagli adattatori delle fonti autorizzate.
+Il sottosistema `places` espone `PlacesAccessibilityAPI` e interroga `PlaceRepository` su PostGIS tramite query spaziali (`ST_DWithin`, `ST_Intersects`) filtrando esclusivamente sui record appartenenti alla `active_generation_id` corrente. Restituisce DTO tipizzati con coordinate WGS84, linee servite e sintesi di accessibilità.
 
 ### 4.3 INFORMAZIONI DI ACCESSIBILITÀ
 
-Il sottosistema Accessibility recupera le caratteristiche associate ai luoghi e valuta validità e provenienza. Ogni risposta include stato, fonte e freschezza disponibili. Dato assente o scaduto è classificato sconosciuto. Le informazioni sono fornite ai dettagli dei luoghi e ai casi d’uso di pianificazione.
+Il sottosistema `accessibility`, tramite `GetPlaceAccessibilityControl`, recupera tutte le `AccessibilityFeature` del luogo selezionato (UC-02), verifica per ciascuna la condizione `observed_at >= now() - 30 days` e mappa automaticamente ogni record scaduto o mancante nello stato `FeatureState.UNKNOWN`, preservando fonte e timestamp originale per trasparenza verso l’utente.
 
 ### 4.4 PIANIFICAZIONE DEI PERCORSI
 
-Il caso d’uso `PlanRouteControl` valida origine, destinazione e vincoli, invoca la porta sostituibile `RoutingProvider` e combina il risultato con le informazioni di accessibilità. L’adattatore invia solo i campi necessari al calcolo ed esclude identificativi dell’account e codici di tracking. La richiesta non è persistita nel dominio dopo la risposta. Ogni tratto è compatibile, incompatibile o sconosciuto sulla base di evidenze valide; il solo risultato del provider non prova l’accessibilità. Timeout, indisponibilità, risposta incompleta e profilo non supportato producono uno stato esplicito. Un eventuale fallback è marcato non verificato e non è presentato come equivalente a un percorso compatibile. La selezione del provider valuta copertura, profili, dettaglio per tratto, provenienza, comportamento in errore, dati trasmessi, log, telemetria, conservazione, licenza, limiti d’uso, disponibilità e costo secondo OPEN-01, OPEN-03, OPEN-05, OPEN-07 e OPEN-08. Il servizio non modifica lo stato persistente di dominio.
+Il sottosistema `routing`, tramite `PlanRouteControl`, valida origine, destinazione e preferenze di accessibilità (UC-01), invoca la porta `RoutingProvider` (implementata da `RoutingProviderAdapter`) e incrocia ciascuna tratta dell’itinerario restituito con lo stato delle fermate/stazioni in `accessibility` e con le segnalazioni attive (`CONFIRMED`) in `reports`. Ogni alternativa restituita classifica esplicitamente tratti compatibili, barriere note e tratti non verificati (`UNKNOWN`).
 
 ### 4.5 SEGNALAZIONI E MODERAZIONE
 
-`CreateReportControl` valida i dati e gestisce l’eventuale upload tramite intento durevole, storage privato e scansione. Prima del primo effetto esterno registra una prenotazione durevole e univoca legata allo scope della chiave e all’impronta canonica di tutti i dati, compreso il digest verificato dell’allegato. La stessa chiave e lo stesso payload recuperano la stessa operazione; la stessa chiave con payload diverso è rifiutata; una richiesta in corso non viene avviata in parallelo. Ambito, durata, formato canonico e coordinamento del recupero restano da approvare in OPEN-08. La chiave non concede accesso ai dati: l’esito ripetuto e il codice di tracking vengono restituiti soltanto secondo OPEN-04 e OPEN-05. Quando l’immagine supera i controlli, una transazione database persiste segnalazione, evento iniziale, collegamento a `report_attachment`, intenzione autorizzata di notifica e completamento della prenotazione. La transazione non comprende object storage. Se fallisce, l’intento lascia l’oggetto privato e consente retry o pulizia secondo OPEN-05, OPEN-08 e OPEN-15. `TrackReportControl` tratta il codice come credenziale e restituisce solo i campi pubblici consentiti. `ModerateReportControl` verifica identità, ruolo, esistenza del report e transizione ammessa. La baseline proposta usa gli stati e le transizioni già elencati in FR-09 del RAD: In verifica verso Confermata, Rifiutata o Duplicata e Confermata verso Risolta. Ogni transizione ammessa aggiorna stato ed evento append-only nella stessa transazione. Un comando non ammesso non modifica stato, evento o outbox. L’unione collega il duplicato a un report di riferimento e non cancella la segnalazione né la sua cronologia. Ruoli, motivazioni, concorrenza, riapertura, campi visibili ed effetti sulle notifiche restano da approvare in OPEN-04, OPEN-05, OPEN-08 e OPEN-12 prima dell’implementazione. Un worker elabora l’outbox dopo il commit; un errore di invio non annulla la segnalazione o la transizione persistita. Il sistema non garantisce consegna esattamente una volta.
-
-Prima dell’upload, `CreateReportControl` inserisce in `report_submission` la prenotazione durevole con scope, digest della chiave e impronta canonica che include i campi normalizzati e il digest verificato dell’eventuale allegato. Un vincolo univoco serializza la prenotazione. Il report, l’evento iniziale, il collegamento dell’allegato, l’outbox autorizzato e il completamento della prenotazione vengono poi persistiti nella stessa transazione. Se il processo si interrompe tra prenotazione e completamento, un retry osserva lo stato pendente e il recupero usa l’intento durevole, senza avviare in parallelo una seconda operazione. Scope, formato canonico, stati terminali, durata e coordinamento del recupero seguono OPEN-04, OPEN-05 e OPEN-08.
+- **Creazione e tracking (`reports`):** `CreateReportControl` coordina la prenotazione in `ReportSubmissionRepository`, l’eventuale upload tramite `StoragePort` (`S3StorageAdapter`), il salvataggio atomico di `Report` e `ReportEvent` e la generazione del codice di tracking. Se la richiesta proviene da una sessione autenticata, `author_id` è valorizzato con l’identificativo dell’utente, così da alimentare lo storico personale (FR-15); per l’Ospite resta nullo. `TrackReportControl` calcola l’hash del codice ricevuto e restituisce un `PublicReportSummaryDTO` privo di qualsiasi riferimento all’autore (NFR-04).
+- **Moderazione (`moderation`):** `ModerateReportControl` verifica il ruolo `ADMINISTRATOR`, controlla la validità della transizione sulla macchina a stati di `Report` (`In verifica` → `Confermata`/`Rifiutata`/`Duplicata`; `Confermata` → `Risolta`) ed esegue in un’unica transazione l’aggiornamento di stato, l’inserimento in `ReportEvent` e l’accodamento in `NotificationOutbox`.
 
 ### 4.6 GEOLOCALIZZAZIONE, SINCRONIZZAZIONE E NOTIFICHE
 
-La ricerca consente di usare coordinate quando disponibili e un inserimento testuale alternativo quando la persona nega la geolocalizzazione. Worker e `TransitDataProvider` importano fonti autorizzate secondo OPEN-01, applicano i contratti OPEN-14 ed eseguono controlli di qualità e registrano versione, timestamp ed esito. Fonti, frequenze e validità seguono OPEN-02. Il routing segue OPEN-03. `NotificationPort` inoltra notifiche in modo asincrono secondo autorizzazioni e consensi. Canali, provider gestiti, retry e procedure operative seguono OPEN-08. Profili di capacità, disponibilità e ripristino seguono OPEN-07.
+Il sottosistema `integrations` e i `worker` implementano le porte asincrone:
+
+- `SynchronizeSourceControl` e `GtfsDataSourceAdapter` scaricano i pacchetti GTFS, eseguono la validazione di schema/geometria, attivano la nuova generazione su `DataSource` e invalidano le chiavi obsolete su Redis.
+- `OutboxNotificationWorker` legge `NotificationOutbox` e invoca `NotificationPort` per inviare aggiornamenti agli utenti registrati che hanno attivato il consenso sul luogo o sulla segnalazione.
+
+## DIAGRAMMI DI PROGETTAZIONE
+
+### 5.1 DIAGRAMMA DELLE CLASSI DI DESIGN
+
+A differenza del diagramma concettuale del RAD (che mostra solo le entità di dominio), il diagramma delle classi di design dettaglia le interfacce (*Ports*), le implementazioni tecniche (*Adapters* e *Repositories*), i *Control* applicativi, le visibilità (`+`, `-`), i tipi e le firme dei metodi principali.
+
+```mermaid
+classDiagram
+  direction TB
+
+  namespace Application {
+    class CreateReportControl {
+      -ReportSubmissionRepository submissionRepo
+      -ReportRepository reportRepo
+      -StoragePort storagePort
+      -OutboxRepository outboxRepo
+      +createReport(CreateReportCommand cmd) TrackingCodeDTO
+    }
+    class ModerateReportControl {
+      -ReportRepository reportRepo
+      -OutboxRepository outboxRepo
+      +moderate(ModerateCommand cmd) void
+    }
+    class PlanRouteControl {
+      -RoutingProvider routingProvider
+      -PlaceRepository placeRepo
+      -ReportRepository reportRepo
+      +planRoutes(RouteQuery query) List~RouteAlternativeDTO~
+    }
+    class SynchronizeSourceControl {
+      -DataSourceAdapter sourceAdapter
+      -SourceRepository sourceRepo
+      -CachePort cachePort
+      +synchronize(UUID sourceId) SyncResultDTO
+    }
+  }
+
+  namespace Ports {
+    class ReportRepository {
+      <<interface>>
+      +saveWithInitialEvent(Report r, ReportEvent e) Report
+      +findById(UUID id) Optional~Report~
+      +findByTrackingCodeHash(String hash) Optional~Report~
+      +updateWithEvent(Report r, ReportEvent e) void
+    }
+    class ReportSubmissionRepository {
+      <<interface>>
+      +reserve(String scope, String keyHash, String payloadDigest) ReportSubmission
+      +markCompleted(UUID submissionId, UUID reportId) void
+    }
+    class StoragePort {
+      <<interface>>
+      +uploadAndScan(String key, InputStream data, String mime) ScanResult
+      +deleteQuietly(String key) void
+    }
+    class RoutingProvider {
+      <<interface>>
+      +computeRawRoutes(GeoPoint from, GeoPoint to) List~RawItinerary~
+    }
+    class OutboxRepository {
+      <<interface>>
+      +enqueue(NotificationIntent intent) void
+      +fetchPending(int limit) List~NotificationIntent~
+      +markSent(UUID id) void
+    }
+  }
+
+  namespace Adapters {
+    class JpaReportRepository {
+      -EntityManager em
+      +saveWithInitialEvent(Report r, ReportEvent e) Report
+      +findById(UUID id) Optional~Report~
+      +findByTrackingCodeHash(String hash) Optional~Report~
+      +updateWithEvent(Report r, ReportEvent e) void
+    }
+    class S3StorageAdapter {
+      -S3Client s3Client
+      -ClamAvClient clamAv
+      -String bucketName
+      +uploadAndScan(String key, InputStream data, String mime) ScanResult
+      +deleteQuietly(String key) void
+    }
+    class ExternalRoutingProviderAdapter {
+      -HttpClient httpClient
+      -URI endpoint
+      +computeRawRoutes(GeoPoint from, GeoPoint to) List~RawItinerary~
+    }
+    class OutboxNotificationWorker {
+      -OutboxRepository outboxRepo
+      -NotificationPort notificationPort
+      +processBatch() void
+    }
+  }
+
+  CreateReportControl --> ReportSubmissionRepository
+  CreateReportControl --> ReportRepository
+  CreateReportControl --> StoragePort
+  CreateReportControl --> OutboxRepository
+  ModerateReportControl --> ReportRepository
+  ModerateReportControl --> OutboxRepository
+  PlanRouteControl --> RoutingProvider
+  JpaReportRepository ..|> ReportRepository
+  S3StorageAdapter ..|> StoragePort
+  ExternalRoutingProviderAdapter ..|> RoutingProvider
+  OutboxNotificationWorker --> OutboxRepository
+```
+
+*Figura 5.1: Diagramma UML delle classi di progettazione (Ports, Controls e Adapters)*
+
+### 5.2 DIAGRAMMI DI SEQUENZA DI DESIGN
+
+I diagrammi seguenti mostrano l’esecuzione dettagliata a livello di componenti progettuali (risorse REST, Control, Repository, Storage S3 e worker asincroni) per i due flussi transazionali più critici del sistema.
+
+#### Invio segnalazione con idempotenza e upload S3 (UC-03, design)
+
+```mermaid
+sequenceDiagram
+  actor U as Ospite / Utente registrato
+  participant REST as ReportsTrackingResource
+  participant CTRL as CreateReportControl
+  participant SUB as ReportSubmissionRepository
+  participant S3 as S3StorageAdapter
+  participant REPO as JpaReportRepository
+  participant OUT as OutboxRepository
+
+  U->>REST: POST /api/v1/reports (Idempotency-Key, multipart)
+  REST->>CTRL: createReport(cmd)
+  CTRL->>SUB: reserve(scope, keyHash, payloadDigest)
+  alt Richiesta duplicata già completata
+    SUB-->>CTRL: Submission(COMPLETED, reportId)
+    CTRL-->>REST: TrackingCodeDTO esistente
+    REST-->>U: 200 OK (TrackingCode)
+  else Nuova prenotazione (PENDING)
+    SUB-->>CTRL: Submission(PENDING)
+    opt Allegato immagine presente
+      CTRL->>S3: uploadAndScan(storageKey, bytes, mime)
+      S3->>S3: Verifica magic bytes, strip EXIF, ClamAV
+      S3-->>CTRL: ScanResult(CLEAN)
+    end
+    alt Scansione fallita o file non valido
+      CTRL->>S3: deleteQuietly(storageKey)
+      CTRL-->>REST: ValidationException
+      REST-->>U: 400 Bad Request
+    else Allegato assente o CLEAN
+      Note over CTRL,OUT: Transazione ACID PostgreSQL
+      CTRL->>REPO: saveWithInitialEvent(report, initialEvent)
+      REPO-->>CTRL: Report persistito
+      CTRL->>OUT: enqueue(notificationIntent)
+      CTRL->>SUB: markCompleted(submissionId, report.id)
+      CTRL-->>REST: TrackingCodeDTO
+      REST-->>U: 201 Created (TrackingCode)
+    end
+  end
+```
+
+*Figura 5.2: Diagramma di sequenza di design per l’invio idempotente di una segnalazione (UC-03)*
+
+#### Moderazione segnalazione e invio notifiche post-commit (UC-05, design)
+
+```mermaid
+sequenceDiagram
+  actor A as Amministratore
+  participant REST as ModerationResource
+  participant CTRL as ModerateReportControl
+  participant REPO as JpaReportRepository
+  participant OUT as OutboxRepository
+  participant WRK as OutboxNotificationWorker
+  participant NOTIF as NotificationPort
+
+  A->>REST: POST /api/v1/moderation/reports/{id}/decision
+  REST->>REST: Verifica sessione e ruolo ADMINISTRATOR
+  REST->>CTRL: moderate(cmd)
+  CTRL->>REPO: findById(reportId)
+  REPO-->>CTRL: Report (stato corrente)
+  CTRL->>CTRL: Valida transizione di stato (FR-09)
+  alt Transizione valida
+    Note over CTRL,OUT: Transazione ACID PostgreSQL
+    CTRL->>REPO: updateWithEvent(report, moderationEvent)
+    CTRL->>OUT: enqueue(statusChangedIntent)
+    CTRL-->>REST: 200 OK
+    REST-->>A: Conferma moderazione e aggiornamento coda
+    loop Esecuzione asincrona post-commit
+      WRK->>OUT: fetchPending(50)
+      OUT-->>WRK: Elenco di NotificationIntent
+      WRK->>NOTIF: send(intent)
+      NOTIF-->>WRK: DeliverySuccess
+      WRK->>OUT: markSent(intent.id)
+    end
+  else Transizione non ammessa
+    CTRL-->>REST: InvalidTransitionException
+    REST-->>A: 422 Unprocessable Entity
+  end
+```
+
+*Figura 5.3: Diagramma di sequenza di design per la moderazione e notifiche outbox (UC-05)*
 
 ## GLOSSARIO
 
-I termini di cache e generazione descrivono invarianti del comportamento progettato. La rappresentazione fisica e la tecnologia di cache sono da selezionare secondo OPEN-08, mantenendo le regole di validità definite per fonte e tipo di dato in OPEN-02.
-
 | Termine | Definizione |
 |---|---|
-| Amministratore | Utente autenticato con permessi espliciti per moderare segnalazioni o gestire fonti. |
-| Adattatore | Componente che collega una porta applicativa a un sistema esterno o a un dettaglio tecnico. |
-| Cache | Memoria temporanea di risultati di lettura. Un dato in cache è selezionabile solo se la chiave corrisponde alle generazioni richieste. |
-| Chiave cache versionata | Chiave composta dal vettore delle generazioni, dall’area e dai parametri normalizzati della query. |
-| DataSource | Fonte autorizzata con responsabile e regole di aggiornamento e validità. |
-| Dato sconosciuto | Dato assente, scaduto o non valido che non consente di determinare l’accessibilità. |
-| DTO | Oggetto di trasferimento usato ai confini applicativi e distinto dal modello di dominio. |
-| Facelets | Tecnologia di viste XHTML usata da Jakarta Faces. |
-| Feature di accessibilità | Caratteristica dichiarata di un luogo, corredata di stato e provenienza. |
-| Generazione attiva | Insieme completo e validato dei dati di una fonte selezionato dal repository per le letture correnti. |
-| Generazione candidata | Insieme di dati importato e validato in isolamento prima della sua eventuale pubblicazione. |
-| GeoPoint | Value object immutabile per coordinate valide con riferimento spaziale esplicito. |
-| GDPR | Regolamento generale sulla protezione dei dati, Regolamento (UE) 2016/679. |
-| Jakarta EE | Piattaforma Enterprise Java di riferimento per runtime, API web e servizi applicativi. |
-| Jakarta Faces | API Jakarta EE per viste server-side basate su componenti. |
-| Jakarta REST | API Jakarta EE per l’esposizione di risorse HTTP. |
-| NotificationPort | Porta applicativa per l’invio di notifiche tramite un adattatore sostituibile. |
-| Ospite | Persona che usa le funzioni pubbliche senza account. |
-| Outbox di notifica | Archivio durevole delle intenzioni di invio persistite nella stessa transazione dell’operazione che le ha generate. |
-| Porta | Interfaccia applicativa che descrive una dipendenza richiesta da un caso d’uso. |
-| PostGIS | Estensione PostgreSQL per dati e interrogazioni geospaziali. |
-| Pubblicazione atomica | Cambio della generazione attiva e registrazione del lavoro di pulizia nella stessa transazione. |
-| Pulizia cache | Rimozione ripetibile delle chiavi riferite a generazioni superate. La correttezza delle letture non dipende dal completamento della rimozione. |
-| Chiave di idempotenza | Identificativo che riconosce i retry della stessa richiesta e impedisce effetti duplicati. Ambito, durata e replay sicuro seguono OPEN-04, OPEN-05 e OPEN-08. |
-| Impronta del payload | Digest del contenuto canonico della richiesta, inclusi i byte dell’eventuale allegato. Consente di rifiutare il riuso della chiave con contenuto diverso. Formato e gestione seguono OPEN-08. |
-| Prenotazione della richiesta | Record persistito prima degli effetti esterni per coordinare retry, concorrenza, recupero e associazione al report completato. |
-| ReportAttachment | Intento durevole e riferimento privato di un allegato. Il ciclo di vita consente riconciliazione tra database e object storage. Stati e conservazione dipendono da OPEN-05, OPEN-08 e OPEN-15. |
-| AttachmentState | Stato del ciclo di upload, scansione, associazione o pulizia. Valori e transizioni devono essere definiti secondo OPEN-05 e OPEN-15. |
-| ReportEvent | Evento immutabile che registra una transizione o decisione su una segnalazione. |
-| Role | Ruolo applicativo assegnato a un account. Valori e permessi sono da approvare secondo OPEN-04. |
-| Stato della segnalazione | Fase corrente del report. Valori e transizioni ammesse dipendono dalla matrice OPEN-12. |
-| RoutingProvider | Porta verso il servizio che calcola alternative di percorso. |
-| Snapshot consistente | Vista del repository che usa gli stessi riferimenti di generazione per selezionare i dati e la loro provenienza durante una lettura. |
-| SourceSync | Registrazione dell’esito, della versione e dei controlli di una sincronizzazione. |
-| SRID | Identificatore del riferimento spaziale di una geometria. |
-| Tracking code | Codice non enumerabile usato per consultare lo stato consentito di una segnalazione. |
-| TransitDataProvider | Porta verso una fonte di dati di trasporto. |
-| Utente registrato | Persona autenticata che usa le funzioni consentite dal proprio account. |
-| Value object | Oggetto immutabile definito dal valore e dalle proprie invarianti. |
-| Vettore delle generazioni | Insieme dei riferimenti alle generazioni attive delle fonti coinvolte in una query. Identifica la versione dei dati usata per costruire la chiave cache. |
-| Worker | Processo asincrono che esegue sincronizzazioni o attività lente fuori dalle richieste interattive. |
+| **SDD** | *System Design Document*, Documento di Progettazione del Sistema. |
+| **Ports & Adapters** | Stile architetturale (architettura esagonale) che isola il dominio applicativo dalle tecnologie esterne tramite interfacce (porte) e implementazioni sostituibili (adattatori). |
+| **Transactional Outbox** | Pattern progettuale in cui l’intenzione di inviare un evento o una notifica viene salvata in una tabella del database nella stessa transazione dell’operazione principale e processata successivamente da un worker. |
+| **Chiave di idempotenza** | Identificativo univoco inviato dal client (`Idempotency-Key`) che permette di riconoscere eventuali ritentativi di rete ed evitare la creazione di segnalazioni duplicate. |
+| **Prenotazione della richiesta** | Record persistito in `report_submission` prima di operazioni esterne su S3 per coordinare richieste concorrenti e consentire la pulizia di upload interrotti. |
+| **Generazione attiva / candidata** | Insieme completo e versionato dei dati importati da una fonte GTFS: la generazione candidata viene validata in isolamento e diventa attiva tramite switch transazionale atomico. |
+| **Vettore delle generazioni** | Insieme degli identificativi delle generazioni attive delle fonti coinvolte in una query, usato per comporre chiavi di cache Redis sempre coerenti. |
+| **DTO** | *Data Transfer Object*, oggetto utilizzato per trasferire dati tra il layer REST/Faces e il layer applicativo senza esporre direttamente le entità di dominio. |
+| **GeoPoint** | *Value object* immutabile che incapsula latitudine e longitudine validate nel sistema di riferimento WGS84 (SRID 4326). |
+| **Argon2id** | Funzione crittografica di derivazione delle chiavi utilizzata per l’hashing sicuro delle password degli utenti. |
+| **Magic bytes** | Sequenza di byte iniziali di un file ispezionata lato server per verificarne il reale formato (JPEG, PNG, WebP) indipendentemente dall’estensione dichiarata. |
+| **Storico append-only** | Tabella `report_event` in cui sono consentiti esclusivamente inserimenti (`INSERT`), garantendo l’immutabilità della cronologia delle decisioni di moderazione. |
+
+*Tabella 6.1: Glossario tecnico e architetturale dell’SDD*
